@@ -284,21 +284,20 @@ print("========= dataset cancer ================")
 xgb_test = xgb.DMatrix(X_list[2].values)
 y_pred = model.predict(xgb_test)
 print(y_pred)
-y_pred_prob = model.predict(xgb_test)
-print(y_pred_prob)
 show_roc_curve(y_test = y_list[2], y_pred = y_pred)
 
 # neg case, prob distribution
 dataset_cancer['pred'] = pd.Series(y_pred)
-dataset_cancer['pred_prob'] = pd.Series(y_pred_prob)
 
 cancer_pos = dataset_cancer[dataset_cancer['class'] == 1]
 cancer_neg = dataset_cancer[dataset_cancer['class'] == 0]
 
 print("Postive sample prediction stat")
-print(cancer_pos['pred_prob'].describe())
+print(cancer_pos['pred'].describe())
 print("Negative sample prediction stat")
-print(cancer_neg['pred_prob'].describe())
+print(cancer_neg['pred'].describe())
+
+dataset_cancer.to_csv('ds_cancer_result.csv', encoding='utf-8')
 
 # grid search cutoff, report auc
 
@@ -306,7 +305,7 @@ def make_pred(x, cutoff):
     return (x > cutoff)
 
 max = 0
-res = pd.Series(y_pred_prob)
+res = pd.Series(y_pred)
 for c in np.arange(0.1, 1.0, 0.1):
     y_pred_c = res.apply(make_pred, args=(c,))
     auc = roc_auc_score(y_list[2], y_pred_c)
@@ -316,7 +315,6 @@ for c in np.arange(0.1, 1.0, 0.1):
         y_pred_cutoff = y_pred_c
 
 print("Max AUC: {} with cutoff {}".format(max, max_cutoff))
-show_roc_curve(y_test = y_list[2], y_pred = y_pred_cutoff)
 
 
 
