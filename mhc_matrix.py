@@ -32,8 +32,6 @@ from IPython.display import display
 
 import csv
 
-from xgboost.compat import DASK_INSTALLED
-
 def BuildBlosum62():
     df = pd.read_csv('blosum62.csv')
     #head = df.columns.tolist()
@@ -46,45 +44,46 @@ def GetSimilarMatrix(df, aa0, aa1):
 
 aminolist = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
 
-def BuildFeature(df, seq, type='sparse'):
-    row = {}
-    #for i in range(len(seq)-1):
-    for i in range(8):
-        for r in aminolist:
-            for c in aminolist:
-                score1 = GetSimilarMatrix(df, seq[i:i+1], r)
-                score2 = GetSimilarMatrix(df, seq[i+1:i+2], c)
-                if type == 'sparse':
-                    row[str(i)+'_'+r+c] = score1 + score2
-                    #print(str(i)+'_'+r+c+' '+str(score1)+' '+str(score2))
-                else:
-                    if r+c in row.keys():
-                        row[r+c] = row[r+c] + score1 + score2
-                    else:
-                        row[r+c] = score1 + score2
-    return row
+def run_xgb_cv(p, k, X, y):
+    xgb_dp = xgb.DMatrix(data=X,label=y)
+    xgb_cv = cv(dtrain=xgb_dp, params=p, nfold=k, num_boost_round=300, metrics="auc", as_pandas=True, seed=123)
+    return xgb_cv
 
-# def BuildFeature(df, seq, type='sparse'):
-#     row = {}
-#     #for i in range(len(seq)-1):
-#     for i in range(8):
-#         for r in aminolist:
-#             for c in aminolist:
-#                 if c < r:
-#                     continue
-#                 score1 = GetSimilarMatrix(df, seq[i:i+1], r)
-#                 score2 = GetSimilarMatrix(df, seq[i+1:i+2], c)
-#                 score3 = GetSimilarMatrix(df, seq[i:i+1], c)
-#                 score4 = GetSimilarMatrix(df, seq[i+1:i+2], r)
-#                 if type == 'sparse':
-#                     row[str(i)+'_'+r+c] = score1 + score2
-#                     #print(str(i)+'_'+r+c+' '+str(score1)+' '+str(score2))
-#                 else:
-#                     if r+c in row.keys():
-#                         row[r+c] = row[r+c] + score1 + score2 + score3 + score4
-#                     else:
-#                         row[r+c] = score1 + score2 + score3 + score4
-#     return row
+def BuildFeature(df, seq, segment=2, type='sparse'):
+    row = {}
+    if segment == 2:
+        #for i in range(len(seq)-1):
+        for i in range(9-segment+1):
+            for r in aminolist:
+                for c in aminolist:
+                    score1 = GetSimilarMatrix(df, seq[i:i+1], r)
+                    score2 = GetSimilarMatrix(df, seq[i+1:i+2], c)
+                    if type == 'sparse':
+                        row[str(i)+'_'+r+c] = score1 + score2
+                        #print(str(i)+'_'+r+c+' '+str(score1)+' '+str(score2))
+                    else:
+                        if r+c in row.keys():
+                            row[r+c] = row[r+c] + score1 + score2
+                        else:
+                            row[r+c] = score1 + score2
+    elif segment == 3:
+        for i in range(9-segment+1):
+            for d0 in aminolist:
+                for d1 in aminolist:
+                    for d2 in aminolist:
+                        score1 = GetSimilarMatrix(df, seq[i:i+1], d0)
+                        score2 = GetSimilarMatrix(df, seq[i+1:i+2], d1)
+                        score3 = GetSimilarMatrix(df, seq[i+1:i+2], d2)
+                        if type == 'sparse':
+                            row[str(i)+'_'+d0+d1+d2] = score1 + score2 + score3
+                            #print(str(i)+'_'+r+c+' '+str(score1)+' '+str(score2))
+                        else:
+                            if d0+d1+d2 in row.keys():
+                                row[d0+d1+d2] = row[d0+d1+d2] + score1 + score2 + score3
+                            else:
+                                row[d0+d1+d2] = score1 + score2 + score3
+
+    return row
 
 # sliding window
 def sliding_df (seq_len, sliding_window, dataset):
@@ -176,32 +175,44 @@ dataset_cancer = LoadDataset(pos_file='dbPepNeo_HC_neoantigens_positive.txt', ne
 dataset_fxxx = LoadDataset(pos_file='f123_ba_positive.txt', neg_file='f000_ba_negative.txt')
 dataset_cxxx = LoadDataset(pos_file='c000_ba_test_positive.txt', neg_file='c000_ba_test_negative.txt')
 
+dataset_c0001234 = LoadDataset(pos_file='c0001234_all_ba_positive.txt', neg_file='c0001234_all_ba_negative.txt')
+dataset_f0001234 = LoadDataset(pos_file='f0001234_all_ba_positive.txt', neg_file='f0001234_all_ba_negative.txt')
+dataset_mc_cancer = LoadDataset(pos_file='MC_cancer_neoantigns_positive.txt', neg_file='MC_cancer_neoantigns_negative.txt')
+#dataset_necid = LoadDataset(pos_file='NECID_Query_all_positive_9aa.txt', neg_file='NECID_Query_all_negative_mut.txt')
+
 scoreTable = BuildBlosum62()
 print(scoreTable)
 
-X_list = []
-y_list = []
-ds_list = [dataset_fxxx, dataset_cxxx, dataset_cancer]
-ds_tag = ['ds_fxxx', 'ds_cxxx', 'ds_cancer']
+X_list = {}
+y_list = {}
+
+ds_list = {
+    #'ds_fxxx': dataset_fxxx,
+    #'ds_cxxx': dataset_cxxx,
+    #'ds_cancer': dataset_cancer,
+    'ds_c0001234': dataset_c0001234,
+    #'ds_f0001234': dataset_f0001234,
+    'ds_mc_cancer': dataset_mc_cancer
+}
 
 LOAD_EXISTING_DATA = True
 if LOAD_EXISTING_DATA:
-    for i in range(len(ds_list)):
-        store = pd.HDFStore(ds_tag[i]+'.h5')
+    for key in ds_list:
+        store = pd.HDFStore(key+'.h5')
         X_ = store['X']
         y_ = store['y']
         store.close()
-        X_list.append(X_)
-        y_list.append(y_)  
+        X_list[key] = X_
+        y_list[key] = y_
 else:
-    for i in range(len(ds_list)):
+    for key, value in ds_list.items():
         X_ = []
         y_ = []
         start = time.time()
-        ds = ds_list[i]
+        ds = value
         for index in range(len(ds)):
             #feat = BuildFeature(df=scoreTable, seq=ds.loc[index, 'sequence'], type='sparse')
-            feat = BuildFeature(df=scoreTable, seq=ds.loc[index, 'sequence'], type='condense')
+            feat = BuildFeature(df=scoreTable, seq=ds.loc[index, 'sequence'], segment=3, type='condense')
             X_.append(feat)
             y_.append(ds.loc[index, 'class'])
 
@@ -209,18 +220,19 @@ else:
         y_ = pd.DataFrame(y_)
         print(X_)
 
-        store = pd.HDFStore(ds_tag[i]+'.h5')
+        store = pd.HDFStore(key+'.h5')
         store['X'] = X_
         store['y'] = y_
         store.close()
 
-        X_list.append(X_)
-        y_list.append(y_)
+        X_list[key] = X_
+        y_list[key] = y_
         end = time.time()
         print("Time to build feature vector: {} sec".format(end-start))
 
-X = X_list[0]
-y = y_list[0]
+use_train = 'ds_c0001234'
+X = X_list[use_train]
+y = y_list[use_train]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=17, stratify=y)
 print(X_train)
 print(y_train)
@@ -261,61 +273,87 @@ params = {
     "nthread": 4
 }
 
-xgb_train = xgb.DMatrix(X_train.values, y_train.values)
-xgb_test = xgb.DMatrix(X_test.values)
+ENABLE_SINGLE_XGBOOST = False
+if ENABLE_SINGLE_XGBOOST:
+    xgb_train = xgb.DMatrix(X_train.values, y_train.values)
+    xgb_test = xgb.DMatrix(X_test.values)
 
-num_round = 300
-watchlist = [(xgb_train, 'train')]
-start = time.time()
-model = xgb.train(params, xgb_train, num_round, watchlist)
-end = time.time()
-print("Time to train: {} sec".format(end-start))
+    num_round = 300
+    watchlist = [(xgb_train, 'train')]
+    start = time.time()
+    model = xgb.train(params, xgb_train, num_round, watchlist)
+    end = time.time()
+    print("Time to train: {} sec".format(end-start))
 
-print("========= training dataset ================")
-y_pred = model.predict(xgb_test)
-show_roc_curve(y_test = y_test, y_pred = y_pred)
+    print("========= training dataset ================")
+    y_pred = model.predict(xgb_test)
+    show_roc_curve(y_test = y_test, y_pred = y_pred)
 
-print("========= dataset cxxx ================")
-xgb_test = xgb.DMatrix(X_list[1].values)
-y_pred = model.predict(xgb_test)
-show_roc_curve(y_test = y_list[1], y_pred = y_pred)
+    print("========= dataset cxxx ================")
+    xgb_test = xgb.DMatrix(X_list[1].values)
+    y_pred = model.predict(xgb_test)
+    show_roc_curve(y_test = y_list[1], y_pred = y_pred)
 
-print("========= dataset cancer ================")
-xgb_test = xgb.DMatrix(X_list[2].values)
-y_pred = model.predict(xgb_test)
-print(y_pred)
-show_roc_curve(y_test = y_list[2], y_pred = y_pred)
+    print("========= dataset cancer ================")
+    xgb_test = xgb.DMatrix(X_list[2].values)
+    y_pred = model.predict(xgb_test)
+    print(y_pred)
+    show_roc_curve(y_test = y_list[2], y_pred = y_pred)
 
-# neg case, prob distribution
-dataset_cancer['pred'] = pd.Series(y_pred)
+    # neg case, prob distribution
+    dataset_cancer['pred'] = pd.Series(y_pred)
 
-cancer_pos = dataset_cancer[dataset_cancer['class'] == 1]
-cancer_neg = dataset_cancer[dataset_cancer['class'] == 0]
+    cancer_pos = dataset_cancer[dataset_cancer['class'] == 1]
+    cancer_neg = dataset_cancer[dataset_cancer['class'] == 0]
 
-print("Postive sample prediction stat")
-print(cancer_pos['pred'].describe())
-print("Negative sample prediction stat")
-print(cancer_neg['pred'].describe())
+    print("Postive sample prediction stat")
+    print(cancer_pos['pred'].describe())
+    print("Negative sample prediction stat")
+    print(cancer_neg['pred'].describe())
 
-dataset_cancer.to_csv('ds_cancer_result.csv', encoding='utf-8')
+    dataset_cancer.to_csv('ds_cancer_result.csv', encoding='utf-8')
 
-# grid search cutoff, report auc
+    # grid search cutoff, report auc
 
-def make_pred(x, cutoff):
-    return (x > cutoff)
+    def make_pred(x, cutoff):
+        return (x > cutoff)
 
-max = 0
-res = pd.Series(y_pred)
-for c in np.arange(0.1, 1.0, 0.1):
-    y_pred_c = res.apply(make_pred, args=(c,))
-    auc = roc_auc_score(y_list[2], y_pred_c)
-    if auc > max:
-        max = auc
-        max_cutoff = c
-        y_pred_cutoff = y_pred_c
+    max = 0
+    res = pd.Series(y_pred)
+    for c in np.arange(0.1, 1.0, 0.1):
+        y_pred_c = res.apply(make_pred, args=(c,))
+        auc = roc_auc_score(y_list[2], y_pred_c)
+        if auc > max:
+            max = auc
+            max_cutoff = c
+            y_pred_cutoff = y_pred_c
 
-print("Max AUC: {} with cutoff {}".format(max, max_cutoff))
+    print("Max AUC: {} with cutoff {}".format(max, max_cutoff))
 
+from xgboost import cv
+
+
+ENABLE_CV_XGBOOST = True
+if ENABLE_CV_XGBOOST:
+    use_train = 'ds_c0001234'
+    print("CV train on "+use_train)
+    X = X_list[use_train]
+    y = y_list[use_train]
+    xgb_cv = run_xgb_cv(p=params, k=5, X=X, y=y)
+    print(xgb_cv)
+
+    # use_train = 'ds_f0001234'
+    # print("CV train on "+use_train)
+    # X = X_list[use_train]
+    # y = y_list[use_train]
+    # xgb_cv = run_xgb_cv(p=params, k=5, X=X, y=y)
+    # print(xgb_cv)
+
+    # use c model to test ds_mc_cancer
+    print("========= train with {} and test on {} =========".format('ds_c0001234', 'ds_mc_cancer'))
+    xgb_test = xgb.DMatrix(X_list['ds_mc_cancer'].values)
+    y_pred = model.predict(xgb_test)
+    show_roc_curve(y_test = y_list['ds_mc_cancer'], y_pred = y_pred)
 
 
 
